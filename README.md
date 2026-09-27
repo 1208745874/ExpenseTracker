@@ -1,0 +1,2 @@
+# ExpenseTracker
+使用Flutter框架制作的安卓记账APP
