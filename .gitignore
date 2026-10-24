@@ -50,3 +50,5 @@ app.*.map.json
 #忽略签名文件
 *.jks
 *.keystore
+
+**/build/
