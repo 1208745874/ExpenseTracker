@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../database/db_helper.dart';
@@ -21,6 +23,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Budget? _budget; // 本月预算（可能为null）
   bool _isLoading = true; // 加载状态
 
+  double _dailyBudget = 0.0;//每日预算
+  double _todayExpense = 0.0;//选中日期当天已消费
+  double _savedToDate = 0.0;//本月截至选中日期累计结余，正数已省，负数超支
+  int _daysInMonth = 30; //当月天数，默认30
+
   // ---- 生命周期 ----
   @override
   void initState() {
@@ -36,13 +43,38 @@ class _HomeScreenState extends State<HomeScreen> {
     // 1. 查询当前月份的支出
     final expenses = await DBHelper().getExpensesByMonth(_yearMonth);
     final total = expenses.fold(0.0, (sum, e) => sum + e.amount);
-
     // 2. 查询当前月份的预算
     final budget = await DBHelper().getBudget(_yearMonth);
+
+    //当月的天数
+    final days =
+        DateTime(_selectedDate.year, _selectedDate.month + 1, 0).day;
+
+    //每日预算
+    final dailyBudget =
+        budget == null ? 0.0 : budget.amount / days;
+
+    //选中日期当天的支出
+    final todayExpense = expenses
+        .where((e) => _isSameDay(DateTime.parse(e.date), _selectedDate))
+        .fold(0.0, (sum, e) => sum + e.amount);
+
+    //本月从一号到选中日期的累计支出
+    final cumulativeExpense = expenses
+        .where((e) => DateTime.parse(e.date).day <= _selectedDate.day)
+        .fold(0.0, (sum, e) => sum + e.amount);
+
+    final savedToDate = budget == null
+        ? 0.0
+        :dailyBudget * _selectedDate.day - cumulativeExpense;
 
     setState(() {
       _monthTotal = total;
       _budget = budget;
+      _dailyBudget = dailyBudget;
+      _todayExpense = todayExpense;
+      _savedToDate = savedToDate;
+      _daysInMonth = days;
       _isLoading = false;
     });
 
@@ -50,6 +82,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_budget == null) {
       _showSetBudgetDialog();
     }
+  }
+
+  bool _isSameDay(DateTime a, DateTime b){
+    return a.year==b.year && a.month==b.month && a.day==b.day;
   }
 
   // ---- 弹出预算设置对话框 ----
@@ -145,6 +181,8 @@ class _HomeScreenState extends State<HomeScreen> {
   // ---- 构建UI ----
   @override
   Widget build(BuildContext context) {
+    final isToday = _isSameDay(_selectedDate, DateTime.now());
+
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -202,7 +240,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ---- 今日日期（可点击选择具体日期） ----
+                  // ---- 今日日期（保持不变） ----
                   Row(
                     children: [
                       const Icon(Icons.calendar_today, size: 20, color: Colors.grey),
@@ -230,7 +268,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // ---- 本月支出卡片 ----
+                  // ---- 本月支出主卡片 ----
                   Card(
                     elevation: 4,
                     shape: RoundedRectangleBorder(
@@ -255,14 +293,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(height: 16),
 
-                          // ---- 预算进度条（如果有预算） ----
+                          // ---- 进度条和理想进度 ----
                           if (_budget != null) ...[
                             LinearProgressIndicator(
-                              value: _monthTotal / _budget!.amount,
+                              value: (_monthTotal / _budget!.amount).clamp(0.0, 1.0).toDouble(),
                               backgroundColor: Colors.grey.shade200,
-                              color: _monthTotal > _budget!.amount
-                                  ? Colors.red
-                                  : Colors.lightBlue,
+                              color: _monthTotal > _budget!.amount ? Colors.red : Colors.lightBlue,
                               minHeight: 12,
                               borderRadius: BorderRadius.circular(6),
                             ),
@@ -279,35 +315,61 @@ class _HomeScreenState extends State<HomeScreen> {
                                   style: TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.bold,
-                                    color: _monthTotal > _budget!.amount
-                                        ? Colors.red
-                                        : Colors.grey.shade700,
+                                    color: _monthTotal > _budget!.amount ? Colors.red : Colors.grey.shade700,
                                   ),
                                 ),
                               ],
                             ),
+
+                            // 新增：理想进度提示（带灰色进度条）
+                            if (_budget != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Column(
+                                  children: [
+                                    // 灰色的理想进度条，高度调细一点（4px）
+                                    LinearProgressIndicator(
+                                      value: (_selectedDate.day / _daysInMonth).clamp(0.0, 1.0).toDouble(),
+                                      backgroundColor: Colors.transparent, // 或者用 Colors.grey.shade100
+                                      color: Colors.grey.shade300, // 淡淡的灰色
+                                      minHeight: 4,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    // 下面的文字行
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          '理想进度：应花 ¥${(_dailyBudget * _selectedDate.day).toStringAsFixed(2)}',
+                                          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                                        ),
+                                        Text(
+                                          '${((_selectedDate.day / _daysInMonth) * 100).toStringAsFixed(1)}%',
+                                          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+
                             if (_monthTotal > _budget!.amount)
                               const Padding(
-                                padding: EdgeInsets.only(top: 8),
+                                padding: EdgeInsets.only(top: 12),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Icon(Icons.warning_amber_rounded,
-                                        color: Colors.red, size: 18),
+                                    Icon(Icons.warning_amber_rounded, color: Colors.red, size: 18),
                                     SizedBox(width: 4),
                                     Text(
                                       '已超预算！',
-                                      style: TextStyle(
-                                        color: Colors.red,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 15,
-                                      ),
+                                      style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 15),
                                     ),
                                   ],
                                 ),
                               ),
                           ] else ...[
-                            // ---- 未设置预算时的提示 ----
                             const Text(
                               '点击下方 "＋" 记账后，可设置本月预算',
                               style: TextStyle(color: Colors.grey, fontSize: 14),
@@ -318,21 +380,123 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
 
-                  const Spacer(),
+          const SizedBox(height: 16),
 
-                  // ---- 底部提示文案 ----
-                  Center(
-                    child: Text(
-                      '点击 "＋" 记录一笔支出',
-                      style: TextStyle(
-                        color: Colors.grey.shade500,
-                        fontSize: 13,
-                      ),
+          // ---- 新增：移到下方的两个小卡片 ----
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 左侧：今日预算卡片（带进度条）
+              Expanded(
+                child: Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.lightBlue.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.lightBlue.withOpacity(0.2)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _isSameDay(_selectedDate, DateTime.now()) ? '今日预算' : '${_selectedDate.day}日预算',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _budget == null ? '--' : '¥${_dailyBudget.toStringAsFixed(2)}',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.lightBlue),
+                        ),
+                        const SizedBox(height: 8),
+
+                        // 今日进度条
+                        if (_budget != null) ...[
+                          LinearProgressIndicator(
+                            value: (_todayExpense / _dailyBudget).clamp(0.0, 1.0).toDouble(),
+                            backgroundColor: Colors.lightBlue.shade50,
+                            color: _todayExpense > _dailyBudget ? Colors.red : Colors.lightBlue,
+                            minHeight: 6,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '${_isSameDay(_selectedDate, DateTime.now()) ? '今日' : '当日'}已消费 ¥${_todayExpense.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _todayExpense > _dailyBudget ? Colors.red : Colors.grey.shade600,
+                              fontWeight: _todayExpense > _dailyBudget ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                        ] else ...[
+                          Text(
+                            '设置预算后计算',
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                          ),
+                        ]
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 16),
-                ],
+                ),
               ),
+              const SizedBox(width: 12),
+
+              // 右侧：累计结余卡片（保持原样）
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: (_savedToDate >= 0 ? Colors.green : Colors.red).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: (_savedToDate >= 0 ? Colors.green : Colors.red).withOpacity(0.25)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '本月截至${_selectedDate.day}日',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _budget == null
+                            ? '--'
+                            : '${_savedToDate >= 0 ? '已省' : '超支'} ¥${_savedToDate.abs().toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: _savedToDate >= 0 ? Colors.green : Colors.red,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _budget == null ? '设置预算后计算' : '含今日预算，随今日消费动态变化',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          const Spacer(),
+
+          // ---- 底部提示文案（保持不变） ----
+          Center(
+            child: Text(
+              '点击 "＋" 记录一笔支出',
+              style: TextStyle(
+                color: Colors.grey.shade500,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
             ),
 
       // ---- 右下角悬浮"+"按钮 ----
