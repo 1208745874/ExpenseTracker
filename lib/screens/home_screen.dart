@@ -3,7 +3,8 @@ import 'package:intl/intl.dart';
 import '../database/db_helper.dart';
 import '../models/budget.dart';
 import '../utils/date_utils.dart' as date_utils;
-import 'add_expense_screen.dart'; // 录入页（第7步实现，现在会报错，别担心）
+import 'add_expense_screen.dart';
+
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -26,6 +27,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadData();
   }
+
 
   // ---- 核心方法：加载数据 ----
   Future<void> _loadData() async {
